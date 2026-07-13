@@ -82,6 +82,7 @@ export default function Home() {
   const [flow, setFlow] = useState<"all" | "income" | "expense">("all");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"desc" | "asc">("desc");
+  const [expanded, setExpanded] = useState(false);
 
   async function upload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -108,7 +109,28 @@ export default function Home() {
       groups.set(key, { amount: current.amount + Math.abs(m.amount), count: current.count + 1 });
     });
     const top = [...groups.entries()].sort((a, b) => b[1].amount - a[1].amount).slice(0, 5);
-    return { income, expense, liquidated, excluded, net: income - expense, top };
+    const categoryOrder = [
+      "Liquidaciones",
+      "Transferencias enviadas",
+      "Transferencias recibidas",
+      "Pagos y compras",
+      "Devoluciones y reclamos",
+      "Bonificaciones",
+      "Rendimientos",
+      "Otros",
+      "Reservas",
+      "Movimiento propio",
+    ];
+    const breakdown = categoryOrder.map((category) => {
+      const categoryMovements = report.movements.filter((m) => m.category === category);
+      return {
+        category,
+        count: categoryMovements.length,
+        total: categoryMovements.reduce((sum, m) => sum + m.amount, 0),
+        excluded: categoryMovements.some((m) => m.excluded),
+      };
+    }).filter((group) => group.count > 0);
+    return { income, expense, liquidated, excluded, net: income - expense, top, breakdown };
   }, [report]);
 
   const rows = useMemo(() => {
@@ -118,6 +140,8 @@ export default function Home() {
       .filter((m) => `${m.description} ${m.category}`.toLowerCase().includes(query.toLowerCase()))
       .sort((a, b) => sort === "desc" ? Math.abs(b.amount) - Math.abs(a.amount) : Math.abs(a.amount) - Math.abs(b.amount));
   }, [report, flow, query, sort]);
+
+  const visibleRows = expanded ? rows : rows.slice(0, 10);
 
   return (
     <main>
@@ -164,6 +188,19 @@ export default function Home() {
             </article>
           </section>
 
+          <section className="panel summary">
+            <div className="panel-title"><div><span>Resumen por tipo</span><h2>Qué compone el movimiento del período</h2></div><small>{stats.breakdown.length} grupos</small></div>
+            <div className="summary-list">
+              {stats.breakdown.map((group) => (
+                <div className="summary-row" key={group.category}>
+                  <div className={`summary-icon ${group.total < 0 ? "out" : "in"}`}>{group.excluded ? "—" : group.total < 0 ? "↓" : "↑"}</div>
+                  <div className="summary-name"><strong>{group.category}</strong><small>{group.count} {group.count === 1 ? "movimiento" : "movimientos"}{group.excluded ? " · excluidos del resultado" : ""}</small></div>
+                  <strong className={group.excluded ? "amount-neutral" : group.total >= 0 ? "amount-in" : "amount-out"}>{group.total >= 0 ? "+" : "-"}{money.format(Math.abs(group.total))}</strong>
+                </div>
+              ))}
+            </div>
+          </section>
+
           <section className="panel movements">
             <div className="panel-title"><div><span>Detalle completo</span><h2>Todos los movimientos</h2></div><strong>{rows.length} resultados</strong></div>
             <div className="filters">
@@ -171,7 +208,8 @@ export default function Home() {
               <input aria-label="Buscar movimientos" placeholder="Buscar concepto o persona" value={query} onChange={(e) => setQuery(e.target.value)} />
               <select aria-label="Ordenar movimientos" value={sort} onChange={(e) => setSort(e.target.value as "asc" | "desc")}><option value="desc">Mayor a menor</option><option value="asc">Menor a mayor</option></select>
             </div>
-            <div className="table-wrap"><table><thead><tr><th>Fecha</th><th>Movimiento</th><th>Categoría</th><th>Estado</th><th>Importe</th></tr></thead><tbody>{rows.map((m) => <tr key={`${m.id}-${m.amount}`}><td>{m.date}</td><td><strong>{m.description}</strong><small>ID {m.id}</small></td><td><span className="tag">{m.category}</span></td><td>{m.excluded ? <span className="excluded">No impacta</span> : <span className="included">Incluido</span>}</td><td className={m.amount >= 0 ? "amount-in" : "amount-out"}>{m.amount >= 0 ? "+" : "-"}{money.format(Math.abs(m.amount))}</td></tr>)}</tbody></table></div>
+            <div className="table-wrap"><table><thead><tr><th>Fecha</th><th>Movimiento</th><th>Categoría</th><th>Estado</th><th>Importe</th></tr></thead><tbody>{visibleRows.map((m) => <tr key={`${m.id}-${m.amount}`}><td>{m.date}</td><td><strong>{m.description}</strong><small>ID {m.id}</small></td><td><span className="tag">{m.category}</span></td><td>{m.excluded ? <span className="excluded">No impacta</span> : <span className="included">Incluido</span>}</td><td className={m.amount >= 0 ? "amount-in" : "amount-out"}>{m.amount >= 0 ? "+" : "-"}{money.format(Math.abs(m.amount))}</td></tr>)}</tbody></table></div>
+            {rows.length > 10 && <div className="show-more"><button onClick={() => setExpanded((value) => !value)}>{expanded ? "Ver menos" : `Ver más (${rows.length - 10})`}<span>{expanded ? "↑" : "↓"}</span></button></div>}
           </section>
         </div>
       )}

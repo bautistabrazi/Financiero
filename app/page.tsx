@@ -21,6 +21,22 @@ type Report = {
   movements: Movement[];
 };
 
+type SettlementItem = {
+  id: string;
+  date: string;
+  type: string;
+  gross: number;
+  fees: number;
+  taxes: number;
+  net: number;
+  business: string;
+};
+
+type SettlementReport = {
+  name: string;
+  items: SettlementItem[];
+};
+
 const money = new Intl.NumberFormat("es-AR", {
   style: "currency",
   currency: "ARS",
@@ -29,6 +45,33 @@ const money = new Intl.NumberFormat("es-AR", {
 
 function parseMoney(value = "0") {
   return Number(value.replace(/\./g, "").replace(",", ".")) || 0;
+}
+
+function parseDecimal(value = "0") {
+  return Number(value) || 0;
+}
+
+function parseSettlementReport(text: string, name: string): SettlementReport {
+  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/).filter((line) => line.trim());
+  const headers = lines[0]?.split(";") ?? [];
+  const index = (column: string) => headers.indexOf(column);
+  if (index("TRANSACTION_TYPE") < 0 || index("REAL_AMOUNT") < 0) {
+    throw new Error("Este archivo no es el reporte de liquidaciones de Mercado Pago.");
+  }
+  const items = lines.slice(1).map((line) => {
+    const cells = line.split(";");
+    return {
+      id: cells[index("SOURCE_ID")] || "",
+      date: (cells[index("SETTLEMENT_DATE")] || cells[index("TRANSACTION_DATE")] || "").slice(0, 10),
+      type: cells[index("TRANSACTION_TYPE")] || "OTHER",
+      gross: parseDecimal(cells[index("TRANSACTION_AMOUNT")]),
+      fees: parseDecimal(cells[index("FEE_AMOUNT")]),
+      taxes: parseDecimal(cells[index("TAXES_AMOUNT")]),
+      net: parseDecimal(cells[index("REAL_AMOUNT")]),
+      business: cells[index("BUSINESS_UNIT")] || "Sin unidad",
+    };
+  }).filter((item) => item.id);
+  return { name, items };
 }
 
 function classify(description: string) {
@@ -83,6 +126,9 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"desc" | "asc">("desc");
   const [expanded, setExpanded] = useState(false);
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [settlementReport, setSettlementReport] = useState<SettlementReport | null>(null);
+  const [settlementError, setSettlementError] = useState("");
 
   async function upload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -92,6 +138,17 @@ export default function Home() {
       setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "No pudimos leer el archivo.");
+    }
+  }
+
+  async function uploadSettlement(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      setSettlementReport(parseSettlementReport(await file.text(), file.name));
+      setSettlementError("");
+    } catch (reason) {
+      setSettlementError(reason instanceof Error ? reason.message : "No pudimos leer el reporte de liquidaciones.");
     }
   }
 
@@ -142,6 +199,40 @@ export default function Home() {
   }, [report, flow, query, sort]);
 
   const visibleRows = expanded ? rows : rows.slice(0, 10);
+  const modalMovements = report && activeCategory
+    ? report.movements.filter((movement) => movement.category === activeCategory)
+    : [];
+  const modalGroups = useMemo(() => {
+    const groups = new Map<string, { count: number; total: number }>();
+    modalMovements.forEach((movement) => {
+      const name = counterpart(movement);
+      const current = groups.get(name) ?? { count: 0, total: 0 };
+      groups.set(name, { count: current.count + 1, total: current.total + movement.amount });
+    });
+    return [...groups.entries()].sort((a, b) => Math.abs(b[1].total) - Math.abs(a[1].total));
+  }, [modalMovements]);
+
+  const settlementBreakdown = useMemo(() => {
+    if (!settlementReport) return [];
+    const definitions = [
+      { label: "Productos vendidos", test: (item: SettlementItem) => item.business === "Mercado Libre" && item.type === "SETTLEMENT" },
+      { label: "Envíos", test: (item: SettlementItem) => item.type === "SETTLEMENT_SHIPPING" },
+      { label: "Bonificaciones", test: (item: SettlementItem) => item.type === "CASHBACK" },
+      { label: "Devoluciones", test: (item: SettlementItem) => item.type === "REFUND" },
+      { label: "Reclamos y disputas", test: (item: SettlementItem) => item.type.startsWith("DISPUTE") },
+    ];
+    return definitions.map((definition) => {
+      const items = settlementReport.items.filter(definition.test);
+      return {
+        label: definition.label,
+        count: items.length,
+        gross: items.reduce((sum, item) => sum + item.gross, 0),
+        fees: items.reduce((sum, item) => sum + item.fees, 0),
+        taxes: items.reduce((sum, item) => sum + item.taxes, 0),
+        net: items.reduce((sum, item) => sum + item.net, 0),
+      };
+    }).filter((group) => group.count > 0);
+  }, [settlementReport]);
 
   return (
     <main>
@@ -160,6 +251,7 @@ export default function Home() {
           <small>El archivo se procesa en este navegador.</small>
         </section>
       ) : stats && (
+        <>
         <div className="dashboard">
           <section className="heading">
             <div><div className="eyebrow">Resumen del período</div><h1>Así se movió tu dinero</h1><p>{report.name} · {report.movements.length} movimientos</p></div>
@@ -192,11 +284,12 @@ export default function Home() {
             <div className="panel-title"><div><span>Resumen por tipo</span><h2>Qué compone el movimiento del período</h2></div><small>{stats.breakdown.length} grupos</small></div>
             <div className="summary-list">
               {stats.breakdown.map((group) => (
-                <div className="summary-row" key={group.category}>
+                <button type="button" className="summary-row" key={group.category} onClick={() => setActiveCategory(group.category)}>
                   <div className={`summary-icon ${group.total < 0 ? "out" : "in"}`}>{group.excluded ? "—" : group.total < 0 ? "↓" : "↑"}</div>
                   <div className="summary-name"><strong>{group.category}</strong><small>{group.count} {group.count === 1 ? "movimiento" : "movimientos"}{group.excluded ? " · excluidos del resultado" : ""}</small></div>
                   <strong className={group.excluded ? "amount-neutral" : group.total >= 0 ? "amount-in" : "amount-out"}>{group.total >= 0 ? "+" : "-"}{money.format(Math.abs(group.total))}</strong>
-                </div>
+                  <span className="summary-open">Ver detalle →</span>
+                </button>
               ))}
             </div>
           </section>
@@ -212,6 +305,55 @@ export default function Home() {
             {rows.length > 10 && <div className="show-more"><button onClick={() => setExpanded((value) => !value)}>{expanded ? "Ver menos" : `Ver más (${rows.length - 10})`}<span>{expanded ? "↑" : "↓"}</span></button></div>}
           </section>
         </div>
+        {activeCategory && (
+          <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setActiveCategory(null); }}>
+            <section className="detail-modal" role="dialog" aria-modal="true" aria-labelledby="detail-title">
+              <header className="modal-header">
+                <div><span>Detalle de categoría</span><h2 id="detail-title">{activeCategory}</h2></div>
+                <button type="button" className="modal-close" aria-label="Cerrar" onClick={() => setActiveCategory(null)}>×</button>
+              </header>
+
+              <div className="modal-kpis">
+                <article><small>Total neto</small><strong>{money.format(modalMovements.reduce((sum, movement) => sum + movement.amount, 0))}</strong></article>
+                <article><small>Movimientos</small><strong>{modalMovements.length}</strong></article>
+                <article><small>Promedio</small><strong>{money.format(modalMovements.length ? modalMovements.reduce((sum, movement) => sum + Math.abs(movement.amount), 0) / modalMovements.length : 0)}</strong></article>
+              </div>
+
+              {activeCategory === "Liquidaciones" && (
+                <div className="settlement-detail">
+                  <div className="modal-section-title"><div><span>Composición comercial</span><h3>Productos, envíos y ajustes</h3></div></div>
+                  {!settlementReport ? (
+                    <div className="settlement-upload">
+                      <div><strong>El estado de cuenta no incluye este desglose.</strong><p>Cargá también el CSV de liquidaciones para separar productos, envíos, descuentos, impuestos y reclamos.</p></div>
+                      <label className="upload compact">Cargar liquidaciones<input type="file" accept=".csv" onChange={uploadSettlement} /></label>
+                      {settlementError && <small className="error">{settlementError}</small>}
+                    </div>
+                  ) : (
+                    <>
+                      <div className="settlement-source"><span>{settlementReport.name}</span><label>Cambiar archivo<input type="file" accept=".csv" onChange={uploadSettlement} /></label></div>
+                      <div className="settlement-grid">
+                        {settlementBreakdown.map((group) => (
+                          <article key={group.label}><span>{group.label}</span><strong className={group.net >= 0 ? "amount-in" : "amount-out"}>{money.format(group.net)}</strong><small>{group.count} operaciones · Bruto {money.format(group.gross)}</small><small>Descuentos {money.format(Math.abs(group.fees))} · Impuestos {money.format(Math.abs(group.taxes))}</small></article>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              <div className="modal-section-title"><div><span>Principales conceptos</span><h3>{activeCategory.includes("Transferencias") ? "Personas y destinatarios" : "Movimientos agrupados"}</h3></div></div>
+              <div className="modal-groups">
+                {modalGroups.slice(0, 8).map(([name, value]) => (
+                  <div key={name}><span>{name}</span><small>{value.count} {value.count === 1 ? "operación" : "operaciones"}</small><strong className={value.total >= 0 ? "amount-in" : "amount-out"}>{value.total >= 0 ? "+" : "-"}{money.format(Math.abs(value.total))}</strong></div>
+                ))}
+              </div>
+
+              <div className="modal-section-title"><div><span>Operación por operación</span><h3>Detalle completo</h3></div></div>
+              <div className="modal-table"><table><thead><tr><th>Fecha</th><th>Descripción</th><th>Importe</th></tr></thead><tbody>{modalMovements.map((movement) => <tr key={`${movement.id}-modal`}><td>{movement.date}</td><td>{movement.description}</td><td className={movement.amount >= 0 ? "amount-in" : "amount-out"}>{movement.amount >= 0 ? "+" : "-"}{money.format(Math.abs(movement.amount))}</td></tr>)}</tbody></table></div>
+            </section>
+          </div>
+        )}
+        </>
       )}
     </main>
   );

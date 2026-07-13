@@ -1,5 +1,3 @@
-"use client";
-
 import { ChangeEvent, useMemo, useState } from "react";
 
 type Movement = {

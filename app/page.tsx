@@ -123,6 +123,16 @@ function counterpart(movement: Movement) {
     .trim();
 }
 
+function dateValue(date: string) {
+  const [day, month, year] = date.split("-").map(Number);
+  return new Date(year, month - 1, day).getTime();
+}
+
+function displayDate(date: string) {
+  const [day, month, year] = date.split("-");
+  return `${day}/${month}/${year}`;
+}
+
 export default function Home() {
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState("");
@@ -133,15 +143,25 @@ export default function Home() {
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [settlementReport, setSettlementReport] = useState<SettlementReport | null>(null);
   const [settlementError, setSettlementError] = useState("");
+  const [lastUpdate, setLastUpdate] = useState("");
 
   async function upload(event: ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
     const file = event.target.files?.[0];
     if (!file) return;
     try {
       setReport(parseReport(await file.text(), file.name));
+      setSettlementReport(null);
+      setActiveCategory(null);
+      setExpanded(false);
+      setFlow("all");
+      setQuery("");
+      setLastUpdate(new Intl.DateTimeFormat("es-AR", { hour: "2-digit", minute: "2-digit" }).format(new Date()));
       setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "No pudimos leer el archivo.");
+    } finally {
+      input.value = "";
     }
   }
 
@@ -163,6 +183,8 @@ export default function Home() {
     const expense = included.filter((m) => m.amount < 0).reduce((sum, m) => sum + Math.abs(m.amount), 0);
     const liquidated = report.movements.filter((m) => m.category === "Liquidaciones").reduce((sum, m) => sum + m.amount, 0);
     const excluded = report.movements.filter((m) => m.excluded).reduce((sum, m) => sum + Math.abs(m.amount), 0);
+    const sortedDates = report.movements.map((movement) => movement.date).sort((a, b) => dateValue(a) - dateValue(b));
+    const period = sortedDates.length ? `${displayDate(sortedDates[0])} al ${displayDate(sortedDates[sortedDates.length - 1])}` : "Sin fechas";
     const groups = new Map<string, { amount: number; count: number }>();
     included.filter((m) => m.amount < 0).forEach((m) => {
       const key = counterpart(m);
@@ -195,7 +217,7 @@ export default function Home() {
         excluded: categoryMovements.some((m) => m.excluded),
       };
     }).filter((group) => group.count > 0);
-    return { income, expense, liquidated, excluded, net: income - expense, top, breakdown };
+    return { income, expense, liquidated, excluded, net: income - expense, top, breakdown, period };
   }, [report]);
 
   const rows = useMemo(() => {
@@ -249,14 +271,14 @@ export default function Home() {
   return (
     <main>
       <header className="topbar">
-        <div className="brand"><span>F</span><strong>Flujo claro</strong></div>
-        {report && <label className="upload compact">Actualizar CSV<input type="file" accept=".csv" onChange={upload} /></label>}
+        <div className="brand"><div className="brand-mark"><img src="/logo-bg-tienda.png" alt="BG Tienda" /></div><div><strong>Análisis de flujo</strong><small>Panel financiero · BG Tienda</small></div></div>
+        {report && <div className="update-area"><span>{lastUpdate ? `Actualizado ${lastUpdate}` : report.name}</span><label className="upload compact">Reemplazar reporte<input type="file" accept=".csv" onChange={upload} /></label></div>}
       </header>
 
       {!report ? (
         <section className="welcome">
           <div className="eyebrow">Tu dinero, explicado con claridad</div>
-          <h1>Entendé qué generó tu negocio y a dónde fue el dinero.</h1>
+          <h1>Análisis de flujo</h1>
           <p>Cargá el estado de cuenta de Mercado Pago. Las reservas y movimientos propios se separan automáticamente para no distorsionar el resultado.</p>
           <label className="upload">Elegir reporte CSV<input type="file" accept=".csv" onChange={upload} /></label>
           {error && <p className="error">{error}</p>}
@@ -266,15 +288,15 @@ export default function Home() {
         <>
         <div className="dashboard">
           <section className="heading">
-            <div><div className="eyebrow">Resumen del período</div><h1>Así se movió tu dinero</h1><p>{report.name} · {report.movements.length} movimientos</p></div>
-            <div className={`net ${stats.net >= 0 ? "positive" : "negative"}`}><small>Flujo externo neto</small><strong>{money.format(stats.net)}</strong><span>sin reservas ni movimientos propios</span></div>
+            <div><div className="eyebrow">Resumen del período</div><h1>Movimientos de tu dinero</h1><div className="period-meta"><span>Del {stats.period}</span><span>{report.movements.length} movimientos</span></div></div>
+            <div className={`net ${stats.net >= 0 ? "positive" : "negative"}`}><small>Balance real del período</small><strong>{money.format(stats.net)}</strong><span>Ingresos menos egresos, sin movimientos internos</span></div>
           </section>
 
           <section className="cards">
-            <article><span>Dinero liquidado</span><strong>{money.format(stats.liquidated)}</strong><small>Ingresos por liquidaciones</small></article>
-            <article><span>Ingresos externos</span><strong>{money.format(stats.income)}</strong><small>Operaciones incluidas</small></article>
-            <article><span>Egresos externos</span><strong>{money.format(stats.expense)}</strong><small>Pagos y transferencias</small></article>
-            <article className="muted-card"><span>Movimientos excluidos</span><strong>{money.format(stats.excluded)}</strong><small>Reservas y cuentas propias</small></article>
+            <article className="metric-card liquidated-card"><span>Liquidaciones recibidas</span><strong>{money.format(stats.liquidated)}</strong><small>Dinero liberado por tus ventas</small></article>
+            <article className="metric-card income-card"><span>Total que ingresó</span><strong>{money.format(stats.income)}</strong><small>Ventas, transferencias y otros ingresos reales</small></article>
+            <article className="metric-card expense-card"><span>Total que salió</span><strong>{money.format(stats.expense)}</strong><small>Pagos, servicios y transferencias reales</small></article>
+            <article className="metric-card reserve-card"><span>Movimientos entre reservas</span><strong>{money.format(stats.excluded)}</strong><small>No modifican el resultado del negocio</small></article>
           </section>
 
           <section className="insights">

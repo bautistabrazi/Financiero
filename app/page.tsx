@@ -156,7 +156,7 @@ export default function Home() {
       setExpanded(false);
       setFlow("all");
       setQuery("");
-      setLastUpdate(new Intl.DateTimeFormat("es-AR", { hour: "2-digit", minute: "2-digit" }).format(new Date()));
+      setLastUpdate(new Intl.DateTimeFormat("es-AR", { hour: "2-digit", minute: "2-digit", hour12: false, hourCycle: "h23" }).format(new Date()));
       setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "No pudimos leer el archivo.");
@@ -271,7 +271,7 @@ export default function Home() {
   return (
     <main>
       <header className="topbar">
-        <div className="brand"><div className="brand-mark"><img src="/logo-bg-tienda.png" alt="BG Tienda" /></div><div><strong>Análisis de flujo</strong><small>Panel financiero · BG Tienda</small></div></div>
+        <div className="brand"><div className="brand-mark"><img src="/bg-logo-transparent.png" alt="BG Tienda" /></div><div><strong>Análisis de flujo</strong><small>Panel financiero · BG Tienda</small></div></div>
         {report && <div className="update-area"><span>{lastUpdate ? `Actualizado ${lastUpdate}` : report.name}</span><label className="upload compact">Reemplazar reporte<input type="file" accept=".csv" onChange={upload} /></label></div>}
       </header>
 

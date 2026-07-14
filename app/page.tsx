@@ -79,6 +79,7 @@ function classify(description: string) {
   if (text.includes("transferencia enviada bautista brazi") || text.includes("transferencia recibida bautista brazi"))
     return { category: "Movimiento propio", excluded: true };
   if (text.includes("liquidación de dinero")) return { category: "Liquidaciones", excluded: false };
+  if (text.includes("transferencia enviada silvana anahi britez")) return { category: "Servicios", excluded: false };
   if (text.includes("transferencia enviada")) return { category: "Transferencias enviadas", excluded: false };
   if (text.includes("transferencia recibida")) return { category: "Transferencias recibidas", excluded: false };
   if (text.includes("devoluci") || text.includes("reclamo") || text.includes("retenido") || text.includes("débito por deuda"))
@@ -166,6 +167,7 @@ export default function Home() {
     const top = [...groups.entries()].sort((a, b) => b[1].amount - a[1].amount).slice(0, 5);
     const categoryOrder = [
       "Liquidaciones",
+      "Servicios",
       "Transferencias enviadas",
       "Transferencias recibidas",
       "Pagos y compras",

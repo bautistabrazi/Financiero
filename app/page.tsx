@@ -74,7 +74,12 @@ function parseSettlementReport(text: string, name: string): SettlementReport {
 
 function classify(description: string) {
   const text = description.toLocaleLowerCase("es");
-  if (text.includes("reserva programada") || text.includes("dinero reservado") || text.includes("dinero retirado"))
+  const isReserve = text.includes("reserva programada") || text.includes("dinero reservado") || text.includes("dinero retirado");
+  if (isReserve && /\bsj\b/.test(text)) return { category: "Reserva SJ", excluded: true };
+  if (isReserve && (text.includes("impuesto") || text.includes("impositivo")))
+    return { category: "Reserva publicidad e impuestos", excluded: true };
+  if (isReserve && text.includes("stock")) return { category: "Reserva stock", excluded: true };
+  if (isReserve)
     return { category: "Reservas", excluded: true };
   if (text.includes("transferencia enviada bautista brazi") || text.includes("transferencia recibida bautista brazi"))
     return { category: "Movimiento propio", excluded: true };
@@ -175,6 +180,9 @@ export default function Home() {
       "Bonificaciones",
       "Rendimientos",
       "Otros",
+      "Reserva SJ",
+      "Reserva publicidad e impuestos",
+      "Reserva stock",
       "Reservas",
       "Movimiento propio",
     ];
@@ -199,6 +207,10 @@ export default function Home() {
   }, [report, flow, query, sort]);
 
   const visibleRows = expanded ? rows : rows.slice(0, 10);
+  const reserveSJTarget = 800000;
+  const reserveSJBalance = report
+    ? Math.max(0, -report.movements.filter((movement) => movement.category === "Reserva SJ").reduce((sum, movement) => sum + movement.amount, 0))
+    : 0;
   const modalMovements = report && activeCategory
     ? report.movements.filter((movement) => movement.category === activeCategory)
     : [];
@@ -318,6 +330,26 @@ export default function Home() {
                 <article><small>Movimientos</small><strong>{modalMovements.length}</strong></article>
                 <article><small>Promedio</small><strong>{money.format(modalMovements.length ? modalMovements.reduce((sum, movement) => sum + Math.abs(movement.amount), 0) / modalMovements.length : 0)}</strong></article>
               </div>
+
+              {activeCategory === "Reserva SJ" && (
+                <div className="reserve-purpose">
+                  <div><span>Objetivo de fin de mes</span><strong>{money.format(reserveSJBalance)} de {money.format(reserveSJTarget)}</strong><small>Dinero apartado para transferir al terminar el mes.</small></div>
+                  <div className="goal-track"><i style={{ width: `${Math.min(100, reserveSJBalance / reserveSJTarget * 100)}%` }} /></div>
+                  <b>{Math.round(reserveSJBalance / reserveSJTarget * 100)}% completado</b>
+                </div>
+              )}
+
+              {activeCategory === "Reserva publicidad e impuestos" && (
+                <div className="reserve-purpose taxes-purpose">
+                  <div><span>Destino de esta reserva</span><strong>Publicidad y percepciones de Mercado Libre</strong><small>Apartar o retirar estos fondos no impacta el resultado. El gasto se reconoce cuando efectivamente se paga.</small></div>
+                </div>
+              )}
+
+              {activeCategory === "Reserva stock" && (
+                <div className="reserve-purpose stock-purpose">
+                  <div><span>Destino de esta reserva</span><strong>Compra y reposición de stock</strong><small>El movimiento interno queda excluido hasta que el dinero se utilice realmente.</small></div>
+                </div>
+              )}
 
               {activeCategory === "Liquidaciones" && (
                 <div className="settlement-detail">
